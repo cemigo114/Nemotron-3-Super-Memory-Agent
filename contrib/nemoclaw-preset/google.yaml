@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+preset:
+  name: google
+  description: "Google Workspace API access (Gmail, Calendar, Drive, OAuth)"
+
+network_policies:
+  google_oauth:
+    name: google_oauth
+    endpoints:
+      - host: accounts.google.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+      - host: oauth2.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: POST, path: "/token" }
+          - allow: { method: POST, path: "/revoke" }
+      - host: openidconnect.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+      - host: www.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/oauth2/**" }
+  google_gmail:
+    name: google_gmail
+    endpoints:
+      - host: gmail.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+          - allow: { method: PUT, path: "/**" }
+          - allow: { method: PATCH, path: "/**" }
+          - allow: { method: DELETE, path: "/**" }
+  google_calendar:
+    name: google_calendar
+    endpoints:
+      - host: www.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/calendar/**" }
+          - allow: { method: POST, path: "/calendar/**" }
+          - allow: { method: PUT, path: "/calendar/**" }
+          - allow: { method: PATCH, path: "/calendar/**" }
+          - allow: { method: DELETE, path: "/calendar/**" }
+  google_drive:
+    name: google_drive
+    endpoints:
+      - host: www.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/drive/**" }
+          - allow: { method: POST, path: "/drive/**" }
+          - allow: { method: PUT, path: "/drive/**" }
+          - allow: { method: PATCH, path: "/drive/**" }
+          - allow: { method: DELETE, path: "/drive/**" }
+          - allow: { method: GET, path: "/upload/drive/**" }
+          - allow: { method: POST, path: "/upload/drive/**" }
+          - allow: { method: PUT, path: "/upload/drive/**" }
+          - allow: { method: PATCH, path: "/upload/drive/**" }

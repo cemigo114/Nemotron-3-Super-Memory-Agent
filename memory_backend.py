@@ -97,12 +97,20 @@ class MemoryBackend:
     def _resolve(self, virtual_path: str) -> Path:
         """Map a virtual path like /memories/foo.txt to a real filesystem path.
 
-        Raises ValueError on any path traversal attempt.
+        Raises ValueError on any path traversal attempt, null bytes, or
+        paths that escape the sandbox.
         """
+        if not isinstance(virtual_path, str):
+            raise ValueError(f"Path must be a string, got {type(virtual_path).__name__}")
+        if "\x00" in virtual_path:
+            raise ValueError("Null bytes are not allowed in paths.")
+
         clean = virtual_path.replace("\\", "/")
-        # Strip the leading /memories prefix if present
-        if clean.startswith("/memories"):
-            clean = clean[len("/memories"):]
+        # Strip the leading /memories prefix only when followed by / or end-of-string
+        import re
+        m = re.match(r"^/memories(?:/|$)", clean)
+        if m:
+            clean = clean[m.end():]
         clean = clean.lstrip("/")
 
         real = (self.root / clean).resolve()
@@ -119,6 +127,8 @@ class MemoryBackend:
     # ------------------------------------------------------------------
 
     def execute(self, args: dict[str, Any]) -> str:
+        if not isinstance(args, dict):
+            return f"Error: Expected dict arguments, got {type(args).__name__}"
         cmd = args.get("command", "")
         dispatch = {
             "view": self._view,
@@ -135,6 +145,8 @@ class MemoryBackend:
             return handler(args)
         except ValueError as exc:
             return f"Error: {exc}"
+        except OSError as exc:
+            return f"Error: I/O failure: {exc}"
 
     # ------------------------------------------------------------------
     # Commands
@@ -176,7 +188,12 @@ class MemoryBackend:
 
         start = 1
         end = len(file_lines)
-        if view_range and len(view_range) == 2:
+        if (
+            view_range
+            and isinstance(view_range, list)
+            and len(view_range) == 2
+            and all(isinstance(v, int) and not isinstance(v, bool) for v in view_range)
+        ):
             start, end = max(1, view_range[0]), min(len(file_lines), view_range[1])
 
         header = f"Here's the content of {virtual} with line numbers:"
@@ -204,6 +221,8 @@ class MemoryBackend:
 
         old_str = args.get("old_str", "")
         new_str = args.get("new_str", "")
+        if not old_str:
+            return "Error: old_str must be a non-empty string."
         text = path.read_text(encoding="utf-8", errors="replace")
 
         occurrences = text.count(old_str)
@@ -247,7 +266,12 @@ class MemoryBackend:
         lines = text.splitlines(keepends=True)
         n = len(lines)
 
-        if insert_line is None or not (0 <= insert_line <= n):
+        if not isinstance(insert_line, int) or isinstance(insert_line, bool):
+            return (
+                f"Error: Invalid `insert_line` parameter: {insert_line}. "
+                f"Expected an integer."
+            )
+        if not (0 <= insert_line <= n):
             return (
                 f"Error: Invalid `insert_line` parameter: {insert_line}. "
                 f"It should be within the range of lines of the file: [0, {n}]"

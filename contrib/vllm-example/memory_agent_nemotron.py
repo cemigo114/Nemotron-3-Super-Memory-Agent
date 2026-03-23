@@ -103,20 +103,33 @@ MEMORY_TOOL = {
 
 def resolve_path(virtual: str) -> Path:
     """Map /memories/... to a real path, blocking traversal."""
+    import re as _re
+    if not isinstance(virtual, str):
+        raise ValueError(f"Path must be a string, got {type(virtual).__name__}")
+    if "\x00" in virtual:
+        raise ValueError("Null bytes are not allowed in paths.")
     clean = virtual.replace("\\", "/")
-    if clean.startswith("/memories"):
-        clean = clean[len("/memories"):]
+    m = _re.match(r"^/memories(?:/|$)", clean)
+    if m:
+        clean = clean[m.end():]
     clean = clean.lstrip("/")
     real = (MEMORY_DIR / clean).resolve()
-    if not str(real).startswith(str(MEMORY_DIR.resolve())):
+    try:
+        real.relative_to(MEMORY_DIR.resolve())
+    except ValueError:
         raise ValueError(f"Path traversal blocked: {virtual!r}")
     return real
 
 
 def execute_memory(args: dict[str, Any]) -> str:
     """Execute a single memory tool call and return the result string."""
+    if not isinstance(args, dict):
+        return f"Error: Expected dict arguments, got {type(args).__name__}"
     cmd = args.get("command", "")
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return f"Error: Cannot create memory directory: {exc}"
 
     if cmd == "view":
         path = resolve_path(args.get("path", "/memories"))

@@ -61,10 +61,10 @@ def build_client() -> OpenAI:
 
 
 def trim_context(messages: list[dict], keep_system: bool = True) -> list[dict]:
-    """Drop oldest tool-result pairs when the conversation is too long.
+    """Drop oldest assistant+tool-result turns when the conversation is too long.
 
-    This is a rough heuristic: count characters as a proxy for tokens
-    (1 token ~ 4 chars). A proper implementation would use tiktoken.
+    Drops entire turns (assistant message + all its tool results) to avoid
+    orphaning tool_call IDs. Uses 4 chars ~ 1 token as a rough heuristic.
     """
     total_chars = sum(
         len(json.dumps(m, default=str)) for m in messages
@@ -77,20 +77,29 @@ def trim_context(messages: list[dict], keep_system: bool = True) -> list[dict]:
     trimmed = list(messages)
     start = 1 if keep_system and trimmed and trimmed[0]["role"] == "system" else 0
 
-    tool_result_indices = [
-        i for i, m in enumerate(trimmed)
-        if i >= start and m["role"] == "tool"
-    ]
+    # Identify complete tool turns: (assistant_with_tool_calls, [tool_result, ...])
+    turns_to_drop: list[set[int]] = []
+    i = start
+    while i < len(trimmed):
+        m = trimmed[i]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            turn_indices = {i}
+            tc_ids = {tc["id"] for tc in m["tool_calls"]}
+            j = i + 1
+            while j < len(trimmed) and trimmed[j].get("role") == "tool":
+                if trimmed[j].get("tool_call_id") in tc_ids:
+                    turn_indices.add(j)
+                j += 1
+            turns_to_drop.append(turn_indices)
+            i = j
+        else:
+            i += 1
 
-    drop_count = max(0, len(tool_result_indices) - KEEP_TOOL_RESULTS)
+    # Drop oldest turns first, keeping the most recent KEEP_TOOL_RESULTS
+    drop_count = max(0, len(turns_to_drop) - KEEP_TOOL_RESULTS)
     indices_to_drop: set[int] = set()
-    for idx in tool_result_indices[:drop_count]:
-        indices_to_drop.add(idx)
-        if idx > 0 and trimmed[idx - 1]["role"] == "assistant":
-            content = trimmed[idx - 1].get("content")
-            tool_calls = trimmed[idx - 1].get("tool_calls")
-            if tool_calls and not content:
-                indices_to_drop.add(idx - 1)
+    for turn in turns_to_drop[:drop_count]:
+        indices_to_drop.update(turn)
 
     return [m for i, m in enumerate(trimmed) if i not in indices_to_drop]
 
@@ -118,6 +127,9 @@ def agent_turn(
         except Exception as exc:
             return f"[API error: {exc}]"
 
+        if not response.choices:
+            return "[API error: Empty response — no choices returned]"
+
         choice = response.choices[0]
         assistant_msg: dict = {"role": "assistant"}
 
@@ -144,9 +156,21 @@ def agent_turn(
 
         for tc in choice.message.tool_calls:
             try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {"command": "view", "path": "/memories"}
+                raw = tc.function.arguments
+                if raw is None:
+                    raise TypeError("arguments is None")
+                args = json.loads(raw)
+                if not isinstance(args, dict):
+                    raise TypeError(f"Expected dict, got {type(args).__name__}")
+            except (json.JSONDecodeError, TypeError) as parse_err:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": f"Error: Failed to parse tool arguments: {parse_err}",
+                    }
+                )
+                continue
 
             result = memory.execute(args)
             messages.append(
